@@ -1,0 +1,36 @@
+BEGIN
+	DECLARE tb_name VARCHAR(128);
+	DECLARE no_more_tbs INT DEFAULT 0;
+		
+	DECLARE tb_cursor CURSOR FOR SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name NOT REGEXP '_[0-9]*$' AND table_name NOT REGEXP '_log$';
+	DECLARE  CONTINUE HANDLER FOR NOT FOUND  SET  no_more_tbs = 1; /*when "not found" occur,just continue,这个是个条件处理,针对NOT FOUND的条件*/
+	
+	SET @time_cst = CONVERT_TZ(CURRENT_TIMESTAMP, "+00:00", "+08:00");
+	SET @create_tb_name_suf = DATE_FORMAT(@time_cst, '_%Y%m%d');
+	SET @delete_tb_name_suf = DATE_FORMAT(DATE_SUB(@time_cst, INTERVAL 7 DAY), '_%Y%m%d');
+	 
+	OPEN tb_cursor;
+	
+	get_tb: LOOP
+		FETCH tb_cursor INTO tb_name;
+		IF no_more_tbs THEN
+			LEAVE get_tb; 
+		END IF;
+		SET @create_tb_name = CONCAT(tb_name, @create_tb_name_suf);
+-- 		SET @creat_tb_name = CONCAT(tb_name, @create_tb_name_suf);
+-- 新建备份表
+		SET @create_sql = CONCAT('CREATE TABLE IF NOT EXISTS ', @create_tb_name, ' LIKE ', tb_name, ';');
+		PREPARE create_sql FROM @create_sql;
+		EXECUTE create_sql;
+-- 插入数据
+		SET @insert_sql = CONCAT('INSERT INTO ', @create_tb_name, ' SELECT * FROM ', tb_name, ';');
+		PREPARE insert_sql FROM @insert_sql;
+		EXECUTE insert_sql;
+-- 删除备份表
+		SET @delete_sql = CONCAT('DROP TABLE IF EXISTS ', tb_name, @delete_tb_name_suf, ';');
+		PREPARE delete_sql FROM @delete_sql;
+		EXECUTE delete_sql;
+	END LOOP get_tb;
+	
+	CLOSE tb_cursor;
+END
